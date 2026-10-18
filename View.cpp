@@ -1,510 +1,189 @@
 #include "config.h"
 
-void fix_window() {
-	HWND consolewindow = GetConsoleWindow();
-	LONG_PTR style = GetWindowLongPtr(consolewindow, GWL_STYLE);
-	style = style & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME;
-	SetWindowLongPtr(consolewindow, GWL_STYLE, style);
+// Gameplay
+Texture2D texBackground;
+Texture2D texX;
+Texture2D texO;
+
+// Main Menu
+Texture2D texMainBackground;
+Texture2D texLogo;
+Texture2D texBar;
+Texture2D texBarHover;
+Font fontPixel;
+
+// Chèn ảnh vào đây ->
+void LoadGameAssets() {
+    texBackground = LoadTexture("assets/background.png");
+    texX = LoadTexture("assets/x.png");
+    texO = LoadTexture("assets/o.png");
+
+    // --- Tài nguyên Main Menu ---
+    texMainBackground = LoadTexture("assets/menu_background.png");
+    texLogo = LoadTexture("assets/menu_logo.png");
+    texBar = LoadTexture("assets/menu_bar.png");
+    texBarHover = LoadTexture("assets/menu_bar_hover.png");
+
+    // Giữ nét pixel sắc cạnh khi phóng to/thu nhỏ
+    SetTextureFilter(texMainBackground, TEXTURE_FILTER_POINT);
+    SetTextureFilter(texLogo, TEXTURE_FILTER_POINT);
+    SetTextureFilter(texBar, TEXTURE_FILTER_POINT);
+    SetTextureFilter(texBarHover, TEXTURE_FILTER_POINT);
+
+    // Font pixel: nạp ở cỡ 16 (bội số của 8 - đúng lưới pixel của Press Start 2P).
+    // Muốn chữ to hơn thì vẽ ở 32, 48... (gấp nguyên lần) để vẫn sắc nét.
+    fontPixel = LoadFontEx("assets/PressStart2P-Regular.ttf", 16, 0, 0);
+    SetTextureFilter(fontPixel.texture, TEXTURE_FILTER_POINT);
+
+    // --- Cửa sổ nghe nhạc (MusicPlayer.cpp) ---
+    LoadMusicPlayer();
 }
 
-void fix_screen() {
-	HANDLE fixcreen = GetStdHandle(STD_OUTPUT_HANDLE);
-	COORD size = { (SHORT)120, (SHORT)30 };
-	SMALL_RECT windowsize = { 0, 0, size.X - 1, size.Y - 1 };
-	SetConsoleScreenBufferSize(fixcreen, size);
-	SetConsoleWindowInfo(fixcreen, TRUE, &windowsize);
+void UnloadGameAssets() {
+    UnloadTexture(texBackground);
+    UnloadTexture(texX);
+    UnloadTexture(texO);
+
+    // --- Giải phóng tài nguyên Main Menu ---
+    UnloadTexture(texMainBackground);
+    UnloadTexture(texLogo);
+    UnloadTexture(texBar);
+    UnloadTexture(texBarHover);
+    UnloadFont(fontPixel);
+    UnloadMusicPlayer();
 }
 
-void gotoXY(int x, int y) {
-	COORD pos = { (SHORT)x,(SHORT)y };
-	HANDLE currentscreen = GetStdHandle(STD_OUTPUT_HANDLE);
-	SetConsoleCursorPosition(currentscreen, pos);
+void DrawBoardUI() {
+    // 1. Kéo dãn Background cho phủ kín toàn bộ màn hình (1000x700)
+    Rectangle sourceBg = { 0.0f, 0.0f, (float)texBackground.width, (float)texBackground.height };
+    Rectangle destBg = { 0.0f, 0.0f, 1000.0f, 700.0f };
+    DrawTexturePro(texBackground, sourceBg, destBg, { 0.0f, 0.0f }, 0.0f, WHITE);
+
+    // 2. Vẽ các đường kẻ lưới bàn cờ màu đen
+    for (int i = 0; i <= boardsize; i++) {
+        DrawLine(BOARD_OFFSET_X, BOARD_OFFSET_Y + i * CELL_SIZE,
+            BOARD_OFFSET_X + boardsize * CELL_SIZE, BOARD_OFFSET_Y + i * CELL_SIZE, BLACK);
+        DrawLine(BOARD_OFFSET_X + i * CELL_SIZE, BOARD_OFFSET_Y,
+            BOARD_OFFSET_X + i * CELL_SIZE, BOARD_OFFSET_Y + boardsize * CELL_SIZE, BLACK);
+    }
+
+    // 3. Quét toàn bộ mảng dữ liệu để vẽ quân X và O
+    for (int i = 0; i < boardsize; i++) {
+        for (int j = 0; j < boardsize; j++) {
+            // Tính toán tọa độ góc trên bên trái của ô cờ hiện tại
+            int posX = BOARD_OFFSET_X + j * CELL_SIZE;
+            int posY = BOARD_OFFSET_Y + i * CELL_SIZE;
+
+            // TẠO KHUNG ĐÍCH ĐỂ ÉP KÍCH THƯỚC ẢNH
+            // Khung này ép ảnh nhỏ lại, lùi vào 2 pixel và nhỏ hơn ô cờ 4 pixel để tạo viền hở cho đẹp
+            Rectangle destRect = { (float)posX + 2.0f, (float)posY + 2.0f, (float)CELL_SIZE - 4.0f, (float)CELL_SIZE - 4.0f };
+
+            // Nếu ô này được đánh X
+            if (_a[i][j].c == 1) {
+                Rectangle sourceX = { 0.0f, 0.0f, (float)texX.width, (float)texX.height };
+                DrawTexturePro(texX, sourceX, destRect, { 0.0f, 0.0f }, 0.0f, WHITE);
+            }
+            // Nếu ô này được đánh O
+            else if (_a[i][j].c == -1) {
+                Rectangle sourceO = { 0.0f, 0.0f, (float)texO.width, (float)texO.height };
+                DrawTexturePro(texO, sourceO, destRect, { 0.0f, 0.0f }, 0.0f, WHITE);
+            }
+        }
+    }
 }
 
-void setColor(int text, int bg) {
-	HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
-	SetConsoleTextAttribute(hStdOut, (WORD)((bg << 4) | text));
+// ===== Bố cục Main Menu (khung 1000x700) =====
+static const int   MENU_LOGO_TOP = 14;   // Logo cách mép trên
+static const int   MENU_LOGO_GAP = 14;   // Logo -> nút đầu tiên
+static const int   MENU_BTN_GAP = 8;    // Khoảng cách giữa các nút
+static const int   MENU_FONT_SIZE = 16;
+static const float MENU_FONT_SPACING = 1.0f;
+static const Color MENU_TEXT_COLOR = { 176, 64, 30, 255 };
+static const Color MENU_TEXT_HOVER_COLOR = { 110, 38, 12, 255 };
+
+static const char* MENU_LABELS[MENU_BUTTON_COUNT] = {
+    "NEW GAME", "LOAD GAME", "SETTING", "MUSIC", "CREDIT", "EXIT"
+};
+
+// Nút luôn nằm giữa màn hình, kích thước lấy theo ảnh thanh gỗ
+Rectangle GetMenuButtonRect(int index) {
+    float x = (1000.0f - texBar.width) / 2.0f;
+    float y = (float)(MENU_LOGO_TOP + texLogo.height + MENU_LOGO_GAP + index * (texBar.height + MENU_BTN_GAP));
+    return { x, y, (float)texBar.width, (float)texBar.height };
 }
 
-void showCursor(bool visible) {
-	HANDLE handle = GetStdHandle(STD_OUTPUT_HANDLE);
-	CONSOLE_CURSOR_INFO cursorInfo;
-	cursorInfo.dwSize = 10;
-	cursorInfo.bVisible = visible;
-	SetConsoleCursorInfo(handle, &cursorInfo);
+int GetHoveredMenuButton() {
+    if (IsMusicPlayerOpen()) return -1;   // cửa sổ nhạc đang che menu
+    Vector2 mouse = GetMousePosition();
+    for (int i = 0; i < MENU_BUTTON_COUNT; i++) {
+        if (CheckCollisionPointRec(mouse, GetMenuButtonRect(i))) return i;
+    }
+    return -1;
 }
 
-void winEffect(int winner) {
-	showCursor(false);
-	for (int loop = 0; loop < 5; loop++) {
-		setColor(0, 14);
-		for (auto cell : winCells) {
-			gotoXY(_a[cell.r][cell.c].x, _a[cell.r][cell.c].y);
-			cout << (winner == 1 ? "X" : "O");
-		}
-		Sleep(160);
+void DrawMenuUI() {
+    // 1. Nền lớp học (đã cắt sẵn đúng 1000x700 nên vẽ 1:1)
+    DrawTexture(texMainBackground, 0, 0, WHITE);
 
-		for (auto cell : winCells) {
-			gotoXY(_a[cell.r][cell.c].x, _a[cell.r][cell.c].y);
-			setColor(winner == 1 ? 12 : 10, 0);
-			cout << (winner == 1 ? "X" : "O");
-		}
-		Sleep(160);
-	}
-	showCursor(true);
+    // 2. Logo CARO ở giữa phía trên
+    DrawTexture(texLogo, (1000 - texLogo.width) / 2, MENU_LOGO_TOP, WHITE);
+
+    int hovered = GetHoveredMenuButton();
+
+    // 3. Các thanh gỗ ở trạng thái thường
+    for (int i = 0; i < MENU_BUTTON_COUNT; i++) {
+        Rectangle r = GetMenuButtonRect(i);
+        DrawTexture(texBar, (int)r.x, (int)r.y, WHITE);
+    }
+
+    // 4. Thanh đang hover vẽ đè lên sau cùng (ảnh hover lớn hơn do có quầng sáng)
+    if (hovered >= 0) {
+        Rectangle r = GetMenuButtonRect(hovered);
+        int marginX = (texBarHover.width - texBar.width) / 2;
+        int marginY = (texBarHover.height - texBar.height) / 2;
+        DrawTexture(texBarHover, (int)r.x - marginX, (int)r.y - marginY, WHITE);
+    }
+
+    // 5. Chữ trên thanh gỗ (căn giữa; lệch lên 3px vì thanh gỗ có gờ dày ở đáy)
+    for (int i = 0; i < MENU_BUTTON_COUNT; i++) {
+        Rectangle r = GetMenuButtonRect(i);
+        Vector2 ts = MeasureTextEx(fontPixel, MENU_LABELS[i], (float)MENU_FONT_SIZE, MENU_FONT_SPACING);
+        Vector2 pos = { (float)(int)(r.x + (r.width - ts.x) / 2.0f),
+                        (float)(int)(r.y + (r.height - ts.y) / 2.0f) - 3.0f };
+        DrawTextEx(fontPixel, MENU_LABELS[i], pos, (float)MENU_FONT_SIZE, MENU_FONT_SPACING,
+            (i == hovered) ? MENU_TEXT_HOVER_COLOR : MENU_TEXT_COLOR);
+    }
 }
 
-void drawboard(int psize) {
-	setColor(7);
-	for (int i = 0; i <= psize; i++) {
-		gotoXY(left, top + 2 * i);
-		for (int j = 0; j < psize; j++) {
-			cout << "+---";
-		}
-		cout << "+";
+void DrawSettingsUI() {
+    DrawText("CAI DAT GAME", 380, 150, 36, DARKBLUE);
 
-		if (i < psize) {
-			gotoXY(left, top + 2 * i + 1);
-			for (int j = 0; j <= psize; j++) {
-				cout << "|   ";
-			}
-		}
-	}
-	gotoXY(_X, _Y);
+    DrawText(TextFormat("Am thanh: %s (Click de doi)", _sound ? "ON" : "OFF"), 350, 250, 22, DARKGRAY);
+    DrawText(TextFormat("Luat chan 2 dau: %s (Click de doi)", _block2ends ? "ON" : "OFF"), 350, 310, 22, DARKGRAY);
+
+    DrawRectangle(380, 420, 240, 45, LIGHTGRAY);
+    DrawText("QUAY LAI MENU", 415, 432, 20, BLACK);
 }
 
-void redrawBoardMarks() {
-	for (int i = 0; i < boardsize; i++) {
-		for (int j = 0; j < boardsize; j++) {
-			if (_a[i][j].c == 1) {
-				gotoXY(_a[i][j].x, _a[i][j].y);
-				setColor(12);
-				cout << "X";
-			}
-			else if (_a[i][j].c == -1) {
-				gotoXY(_a[i][j].x, _a[i][j].y);
-				setColor(10);
-				cout << "O";
-			}
-		}
-	}
-	setColor(7);
-}
+void DrawGame() {
+    UpdateMusicPlayer();              // nhạc + chuột/phím của cửa sổ nhạc (chạy mỗi frame)
 
-void drawmainscreen() {
-	system("cls");
-	string title = "CARO GAME";
-	string option[] = { "", "New Game", "Load Game", "Setting", "Credit", "Exit" };
-	gotoXY(55, 10);
-	cout << title;
-	for (int i = 1; i <= 5; i++) {
-		gotoXY(55, 10 + 2 * i);
-		cout << option[i];
-	}
-}
+    BeginDrawing();
+    ClearBackground(RAYWHITE);
 
-void mainscreen() {
-	const int startX = 53;
-	const int startY = 12;
-	const int step = 2;
+    switch (currentState) {
+    case STATE_MENU:
+        DrawMenuUI();
+        break;
+    case STATE_GAMEPLAY:
+        DrawBoardUI();
+        break;
+    case STATE_SETTINGS:
+        DrawSettingsUI();
+        break;
+    }
 
-	int option = 1;
-	int totaloption = 5;
+    DrawMusicPlayer();                // vẽ đè lên trên cùng khi đang mở
 
-	gotoXY(startX, startY);
-	cout << ">";
-	gotoXY(startX, startY);
-
-	while (1) {
-		int move = toupper(_getch());
-		int preoption = option;
-
-		if (move == 'W') {
-			option = (option == 1) ? totaloption : option - 1;
-		}
-		else if (move == 'S') {
-			option = (option == totaloption) ? 1 : option + 1;
-		}
-		else if (move == 13) {
-			switch (option) {
-			case 1: newgamescreen(); break;
-			case 2:
-				break;
-			case 3:
-				settingscreen();
-				break;
-			case 4:
-				break;
-			case 5: exit(0); break;
-			}
-		}
-		if (option != preoption) {
-			gotoXY(startX, startY + (preoption - 1) * step);
-			cout << " ";
-			gotoXY(startX, startY + (option - 1) * step);
-			cout << ">";
-			gotoXY(startX, startY + (option - 1) * step);
-		}
-	}
-}
-
-void newgamescreen() {
-	system("cls");
-	const int startX = 50;
-	const int startY = 13;
-	const int step = 4;
-	const int totaloption = 2;
-
-	int option = 1;
-
-	gotoXY(startX + 2, startY);
-	cout << "Play With Friend";
-	gotoXY(startX + 2, startY + step);
-	cout << "Play With Bot";
-	gotoXY(startX, startY);
-	cout << ">";
-	gotoXY(startX, startY);
-	while (1) {
-		int move = toupper(_getch());
-		int preoption = option;
-
-		if (move == 'W') {
-			option = (option == 1) ? totaloption : option - 1;
-		}
-		else if (move == 'S') {
-			option = (option == totaloption) ? 1 : option + 1;
-		}
-		else if (move == 13) {
-			if (option == 1) PvP();
-			else PvBscreen();
-		}
-		else if (move == 27) {
-			drawmainscreen();
-			mainscreen();
-		}
-		if (option != preoption) {
-			gotoXY(startX, startY + (preoption - 1) * step);
-			cout << " ";
-			gotoXY(startX, startY + (option - 1) * step);
-			cout << ">";
-			gotoXY(startX, startY + (option - 1) * step);
-		}
-	}
-}
-
-int pausescreen() {
-	showCursor(false);
-	const int boxX = 47;
-	const int boxY = 11;
-
-	setColor(11);
-	gotoXY(boxX, boxY);     cout << "+--------------------------+";
-	gotoXY(boxX, boxY + 1); cout << "|        PAUSE GAME        |";
-	gotoXY(boxX, boxY + 2); cout << "+--------------------------+";
-	gotoXY(boxX, boxY + 3); cout << "|                          |";
-	gotoXY(boxX, boxY + 4); cout << "|     Continue             |";
-	gotoXY(boxX, boxY + 5); cout << "|                          |";
-	gotoXY(boxX, boxY + 6); cout << "|     Exit                 |";
-	gotoXY(boxX, boxY + 7); cout << "|                          |";
-	gotoXY(boxX, boxY + 8); cout << "+--------------------------+";
-
-	const int startX = boxX + 4;
-	const int startY = boxY + 4;
-	const int step = 2;
-	const int totaloption = 2;
-
-	int option = 1;
-	gotoXY(startX, startY);
-	setColor(14);
-	cout << ">";
-	gotoXY(startX, startY);
-
-	while (1) {
-		int move = toupper(_getch());
-		int preoption = option;
-		if (move == 'S')
-			option = (option == totaloption) ? 1 : option + 1;
-		else if (move == 'W')
-			option = (option == 1) ? totaloption : option - 1;
-		else if (move == 13) {
-			setColor(7);
-			showCursor(true);
-			return option;
-		}
-
-		if (option != preoption) {
-			gotoXY(startX, startY + (preoption - 1) * step);
-			cout << " ";
-			gotoXY(startX, startY + (option - 1) * step);
-			setColor(14);
-			cout << ">";
-			gotoXY(startX, startY + (option - 1) * step);
-		}
-	}
-}
-
-void exitConfirmScreen() {
-	showCursor(false);
-	const int boxX = 47;
-	const int boxY = 11;
-
-	setColor(11);
-	gotoXY(boxX, boxY);     cout << "+--------------------------+";
-	gotoXY(boxX, boxY + 1); cout << "|     BAN CO MUON LUU?     |";
-	gotoXY(boxX, boxY + 2); cout << "+--------------------------+";
-	gotoXY(boxX, boxY + 3); cout << "|                          |";
-	gotoXY(boxX, boxY + 4); cout << "|     Save Game            |";
-	gotoXY(boxX, boxY + 5); cout << "|                          |";
-	gotoXY(boxX, boxY + 6); cout << "|     Don't Save           |";
-	gotoXY(boxX, boxY + 7); cout << "|                          |";
-	gotoXY(boxX, boxY + 8); cout << "+--------------------------+";
-
-	const int startX = boxX + 4;
-	const int startY = boxY + 4;
-	const int step = 2;
-	const int totaloption = 2;
-
-	int option = 1;
-	gotoXY(startX, startY);
-	setColor(14);
-	cout << ">";
-	gotoXY(startX, startY);
-
-	while (1) {
-		int move = toupper(_getch());
-		int preoption = option;
-		if (move == 'S')
-			option = (option == totaloption) ? 1 : option + 1;
-		else if (move == 'W')
-			option = (option == 1) ? totaloption : option - 1;
-		else if (move == 13) {
-			if (option == 1) { 
-				gotoXY(boxX, boxY + 3); cout << "|  Nhap ten file de luu:   |";
-				gotoXY(boxX, boxY + 4); cout << "|  [                      ]|";
-				gotoXY(boxX, boxY + 5); cout << "|                          |";
-				gotoXY(boxX, boxY + 6); cout << "|                          |";
-				gotoXY(boxX + 4, boxY + 4);
-				setColor(14);
-				showCursor(true);
-				string filename;
-				cin >> filename;
-
-				if (saveGameData(filename)) {
-					gotoXY(boxX, boxY + 6);
-					setColor(10);
-					cout << "|  Luu file thanh cong!    |";
-				} else {
-					gotoXY(boxX, boxY + 6);
-					setColor(12);
-					cout << "|  Loi khi luu file!       |";
-				}
-				Sleep(900);
-
-				setColor(7);
-				showCursor(true);
-				drawmainscreen();
-				mainscreen();
-				return;
-			}
-			else if (option == 2) {
-				setColor(7);
-				showCursor(true);
-				drawmainscreen();
-				mainscreen();
-				return;
-			}
-		}
-
-		if (option != preoption) {
-			gotoXY(startX, startY + (preoption - 1) * step);
-			cout << " ";
-			gotoXY(startX, startY + (option - 1) * step);
-			setColor(14);
-			cout << ">";
-			gotoXY(startX, startY + (option - 1) * step);
-		}
-	}
-}
-
-void PvBscreen() {
-	system("cls");
-	const int startX = 56;
-	const int startY = 11;
-	const int step = 4;
-	const int totaloption = 3;
-
-	int option = 1;
-	string level[] = { "Easy", "Medium", "Hard" };
-
-	for (int i = 0; i < 3; i++) {
-		gotoXY(startX + 2, startY + step * i);
-		cout << level[i];
-	}
-
-	gotoXY(startX, startY);
-	cout << ">";
-	gotoXY(startX, startY);
-
-	while (1) {
-		int move = toupper(_getch());
-		int preoption = option;
-
-		if (move == 'W') {
-			option = (option == 1) ? totaloption : option - 1;
-		}
-		else if (move == 'S') {
-			option = (option == totaloption) ? 1 : option + 1;
-		}
-		else if (move == 13) {
-			if (option == 1) PvP();
-			else PvBscreen();
-		}
-		else if (move == 27)
-			newgamescreen();
-		if (option != preoption) {
-			gotoXY(startX, startY + (preoption - 1) * step);
-			cout << " ";
-			gotoXY(startX, startY + (option - 1) * step);
-			cout << ">";
-			gotoXY(startX, startY + (option - 1) * step);
-		}
-	}
-}
-
-void drawsetting(int option, int startX, int y) {
-	gotoXY(startX, y);
-	switch (option) {
-	case 1:
-		cout << "Sound:        < " << (_sound ? "ON " : "OFF") << " >      ";
-		break;
-	case 2:
-		cout << "Volume:       < " << (_volume < 100 ? " " : "") << _volume << "% >     ";
-		break;
-	case 3:
-		cout << "Block 2 Ends: < " << (_block2ends ? "ON " : "OFF") << " >      ";
-		break;
-	case 4:
-		cout << "Move Up:      [ " << (char)_keyUp << " ]         ";
-		break;
-	case 5:
-		cout << "Move Down:    [ " << (char)_keyDown << " ]         ";
-		break;
-	case 6:
-		cout << "Move Left:    [ " << (char)_keyLeft << " ]         ";
-		break;
-	case 7:
-		cout << "Move Right:   [ " << (char)_keyRight << " ]         ";
-		break;
-	}
-	gotoXY(startX - 2, y);
-}
-
-void settingscreen() {
-	system("cls");
-
-	const int startX = 46;
-	const int startY = 9;
-	const int step = 2;
-	const int totaloption = 7;
-
-	gotoXY(55, 7);
-	cout << "SETTINGS";
-
-	for (int i = 1; i <= totaloption; i++) {
-		drawsetting(i, startX + 2, startY + (i - 1) * step);
-	}
-
-	int option = 1;
-	gotoXY(startX, startY);
-	cout << ">";
-	gotoXY(startX, startY);
-
-	while (1) {
-		int move = toupper(_getch());
-		int preoption = option;
-
-		if (move == 'W') {
-			option = (option == 1) ? totaloption : option - 1;
-		}
-		else if (move == 'S') {
-			option = (option == totaloption) ? 1 : option + 1;
-		}
-		else if (move == 13 && option >= 1 && option <= 3) {
-			while (1) {
-				int select = toupper(_getch());
-				if (select == 'A' || select == 'D') {
-					if (option == 1) {
-						_sound = !_sound;
-						drawsetting(1, startX + 2, startY);
-					}
-					else if (option == 2) {
-						if (select == 'A' && _volume > 0) _volume -= 10;
-						if (select == 'D' && _volume < 100) _volume += 10;
-						drawsetting(2, startX + 2, startY + step);
-					}
-					else if (option == 3) {
-						_block2ends = !_block2ends;
-						drawsetting(3, startX + 2, startY + 2 * step);
-					}
-				}
-				if (select == 27 || select == 13)
-					break;
-			}
-		}
-		if (move == 13 && option >= 4 && option <= 7) {
-
-			int newKey = toupper(_getch());
-			if (option == 4) _keyUp = newKey;
-			else if (option == 5) _keyDown = newKey;
-			else if (option == 6) _keyLeft = newKey;
-			else if (option == 7) _keyRight = newKey;
-			drawsetting(option, startX + 2, startY + (option - 1) * step);
-		}
-		else if (move == 27) {
-			drawmainscreen();
-			mainscreen();
-			return;
-		}
-
-		if (option != preoption) {
-			gotoXY(startX, startY + (preoption - 1) * step);
-			cout << " ";
-			gotoXY(startX, startY + (option - 1) * step);
-			cout << ">";
-			gotoXY(startX, startY + (option - 1) * step);
-		}
-	}
-}
-
-int finish(int winner) {
-	if (winner == 2) {
-		_turn = !_turn;
-		return winner;
-	}
-	if (winner == 1 || winner == -1) {
-		winEffect(winner);
-	}
-	gotoXY(0, _a[boardsize - 1][boardsize - 1].y + 2);
-	switch (winner) {
-	case 1:
-		setColor(12);
-		cout << "Nguoi choi 1 da thang va nguoi choi 2 da thua";
-		break;
-	case -1:
-		setColor(10);
-		cout << "Nguoi choi 2 da thang va nguoi choi 1 da thua";
-		break;
-	case 0:
-		setColor(14);
-		cout << "Nguoi choi  2 da hoa nguoi choi 1";
-		break;
-	}
-	setColor(7);
-	return winner;
-}
-
-int askcontinue() {
-	gotoXY(0, _a[boardsize - 1][boardsize - 1].y + 3);
-	cout << "Nhan Y/N de tiep tuc/dung: ";
-	return toupper(_getch());
+    EndDrawing();
 }

@@ -1,5 +1,25 @@
+# Bo qua cac thu muc build va file he thong cua Visual Studio
 .vs/
+Debug/
+Release/
 x64/
-*.exe
+*/Debug/
+*/Release/
+*/x64/
+
+# Bo qua cac file rac sinh ra luc compile
+*.obj
+*.tlog
+*.ilk
+*.idb
 *.pdb
+*.exe.recipe
+*.lastbuildstate
+
+# Bo qua thu muc packages (NuGet se tu tai ve)
+packages/
+
+*.exe
 *.user
+
+

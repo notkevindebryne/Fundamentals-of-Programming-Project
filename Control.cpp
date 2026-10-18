@@ -1,112 +1,120 @@
 #include "config.h"
 
-void startgame() {
-	system("cls");
-	resetdata();
-	drawboard(boardsize);
+GameState currentState = STATE_MENU;
+
+void HandleInput()
+{
+    Vector2 mousePos = GetMousePosition();
+
+    // 1. ƯU TIÊN: Nếu cửa sổ Music đang mở, Control sẽ "chiếm" input để điều khiển nhạc
+    if (playerOpen)
+    {
+        // Đổi bài bằng WASD
+        if (IsKeyPressed(KEY_W) || IsKeyPressed(KEY_A))
+            MusicStep(-1);
+        if (IsKeyPressed(KEY_S) || IsKeyPressed(KEY_D))
+            MusicStep(1);
+
+        // Enter để Play/Pause
+        if (IsKeyPressed(KEY_ENTER))
+            MusicTogglePause();
+
+        // Cuộn chuột để đổi bài
+        float wheel = GetMouseWheelMove();
+        if (wheel != 0)
+            MusicStep((wheel > 0) ? -1 : 1);
+
+        // Chuột (Click hoặc Kéo slider)
+        bool clicked = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+        bool down = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+        MusicProcessMouse(mousePos, clicked, down);
+
+        return; // Dừng tại đây, ngăn không cho click xuyên xuống menu/game ở dưới
+    }
+
+    // 2. Xử lý input game bình thường
+    if (currentState == STATE_MENU)
+    {
+        // Sử dụng hàm GetHoveredMenuButton từ View.cpp để đồng bộ click
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        {
+            int hovered = GetHoveredMenuButton();
+            if (hovered == MENU_NEW_GAME)
+            {
+                resetdata();
+                currentState = STATE_GAMEPLAY;
+            }
+            else if (hovered == MENU_SETTINGS)
+            {
+                currentState = STATE_SETTINGS;
+            }
+            else if (hovered == MENU_MUSIC)
+            {
+                OpenMusicPlayer(); // Mở nhạc
+            }
+            else if (hovered == MENU_EXIT)
+            {
+                CloseWindow();
+            }
+        }
+    }
+    else if (currentState == STATE_SETTINGS)
+    {
+        if (CheckCollisionPointRec(mousePos, {350, 240, 300, 40}) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        {
+            _sound = !_sound;
+        }
+        else if (CheckCollisionPointRec(mousePos, {350, 300, 300, 40}) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        {
+            _block2ends = !_block2ends;
+        }
+        else if (CheckCollisionPointRec(mousePos, {380, 420, 240, 45}) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        {
+            currentState = STATE_MENU;
+        }
+    }
+    else if (currentState == STATE_GAMEPLAY)
+    {
+        if (_winner == 2 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        {
+            int col = (mousePos.x - BOARD_OFFSET_X) / CELL_SIZE;
+            int row = (mousePos.y - BOARD_OFFSET_Y) / CELL_SIZE;
+
+            if (row >= 0 && row < boardsize && col >= 0 && col < boardsize)
+            {
+                if (checkboard(row, col) != 0)
+                {
+                    _winner = testboard();
+                }
+            }
+        }
+
+        if (IsKeyPressed(KEY_R))
+            resetdata();
+        if (IsKeyPressed(KEY_ESCAPE))
+            currentState = STATE_MENU;
+    }
 }
 
-void exitgame() {
-	system("cls");
+void UpdateGame()
+{
+    HandleInput(); // Gọi hàm input tổng
 }
 
-void moveright() {
-	if (_X < _a[boardsize - 1][boardsize - 1].x) {
-		_X += 4;
-		gotoXY(_X, _Y);
-	}
-}
+int main()
+{
+    InitWindow(1000, 700, "GAME CARO - RAYLIB");
+    SetTargetFPS(60);
+    LoadGameAssets();
+    resetdata();
 
-void moveleft() {
-	if (_X > _a[0][0].x) {
-		_X -= 4;
-		gotoXY(_X, _Y);
-	}
-}
+    while (!WindowShouldClose())
+    {
+        UpdateGame();
+        DrawGame();
+    }
 
-void moveup() {
-	if (_Y > _a[0][0].y) {
-		_Y -= 2;
-		gotoXY(_X, _Y);
-	}
-}
-
-void movedown() {
-	if (_Y < _a[boardsize - 1][boardsize - 1].y) {
-		_Y += 2;
-		gotoXY(_X, _Y);
-	}
-}
-
-void moveto(int direction) {
-	if (direction == _keyLeft) {
-		moveleft();
-	}
-	else if (direction == _keyDown) {
-		movedown();
-	}
-	else if (direction == _keyRight) {
-		moveright();
-	}
-	else if (direction == _keyUp) {
-		moveup();
-	}
-}
-
-void PvP() {
-	startgame();
-	bool validEnter = true;
-	while (1) {
-		int command = toupper(_getch());
-		if (command == 27) {
-			int choice = pausescreen();
-			if (choice == 1) {
-				system("cls");
-				drawboard(boardsize);
-				redrawBoardMarks();
-				gotoXY(_X, _Y);
-			}
-			else if (choice == 2) {
-				exitConfirmScreen();
-				return;
-			}
-		}
-		else if (command == _keyEnter) {
-			switch (checkboard(_X, _Y)) {
-			case 1:
-				setColor(12);
-				cout << "X";
-				gotoXY(_X, _Y);
-				break;
-			case -1:
-				setColor(10);
-				cout << "O";
-				gotoXY(_X, _Y);
-				break;
-			case 0:
-				validEnter = 0;
-				gotoXY(_X, _Y);
-				break;
-			};
-			if (validEnter) {
-				if (finish(testboard()) != 2) {
-					if (askcontinue() != 'Y') {
-						exitgame();
-						return;
-					}
-					else
-						startgame();
-				}
-			}
-		}
-		else
-			moveto(command);
-		validEnter = true;
-	}
-}
-int main() {
-	fix_window();
-	drawmainscreen();
-	mainscreen();
-	return 0;
+    UnloadGameAssets();
+    CloseWindow();
+    return 0;
 }
